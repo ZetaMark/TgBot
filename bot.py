@@ -1,45 +1,42 @@
 import os
 import time
-import requests
+import cloudscraper
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
-# Общий эндпоинт ленты листингов CSFloat (сортировка по новизне или низкой цене)
 API_URL = "https://csfloat.com/api/v1/listings"
-
-# Множество для хранения ID уже отправленных предметов, чтобы не спамить
 seen_items = set()
+
+# Создаём скрейпер, который обходит защиту Cloudflare
+scraper = cloudscraper.create_scraper(
+    browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
+)
 
 def send_telegram_alert(text):
     if not TG_TOKEN or not TG_CHAT_ID:
-        print("Ошибка: Токены Telegram не настроены в переменных окружения!")
+        print("Ошибка: Токены Telegram не настроены!")
         return
-        
+
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = {"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "Markdown"}
     try:
-        requests.post(url, json=payload, timeout=10)
+        # Для телеграма можно использовать обычный requests или тот же scraper
+        scraper.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Ошибка отправки в Telegram: {e}")
 
 def check_market_deals():
-    # Параметры: ищем недорогие предметы (до $5)
     params = {
-        "max_price": 500,  # цена в центах ($5.00)
+        "max_price": 500,
         "sort_by": "lowest_price",
         "limit": 30,
     }
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://csfloat.com/",
-        "Origin": "https://csfloat.com"
-    }
 
     try:
-        response = requests.get(API_URL, params=params, headers=headers, timeout=10)
+        # Делаем запрос через scraper вместо requests
+        response = scraper.get(API_URL, params=params, timeout=15)
+
         if response.status_code != 200:
             print(f"Ошибка ответа от API: статус {response.status_code}")
             return
@@ -48,8 +45,6 @@ def check_market_deals():
 
         for item in listings:
             item_id = item.get("id")
-            
-            # Если этот лот мы уже кидали в телегу, просто пропускаем его
             if item_id in seen_items:
                 continue
 
@@ -58,7 +53,6 @@ def check_market_deals():
             float_val = item_info.get("float_value", 1.0)
             price_usd = item.get("price", 0) / 100.0
 
-            # Фильтр: скины в качестве Factory New (float < 0.07) до $0.50
             if float_val < 0.07 and price_usd < 0.50:
                 alert_msg = (
                     f"⚡ *Потенциальная находка!* ⚡\n"
@@ -68,11 +62,8 @@ def check_market_deals():
                     f"Ссылка: https://csfloat.com/item/{item_id}"
                 )
                 send_telegram_alert(alert_msg)
-                
-                # Добавляем ID в список отправленных, чтобы не прислать повторно через 2 минуты
                 seen_items.add(item_id)
-                
-                # Ограничиваем размер множества, чтобы не засорять оперативку (храним последние 1000 ID)
+
                 if len(seen_items) > 1000:
                     seen_items.pop()
 
@@ -83,4 +74,4 @@ if __name__ == "__main__":
     print("Монитор рынка запущен...")
     while True:
         check_market_deals()
-        time.sleep(120)  # проверка каждые 2 минуты
+        time.sleep(120)
