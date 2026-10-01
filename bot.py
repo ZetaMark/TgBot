@@ -1,6 +1,7 @@
 import os
 import time
-import cloudscraper
+import requests
+from curl_cffi import requests as cf_requests
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
@@ -8,21 +9,15 @@ TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 API_URL = "https://csfloat.com/api/v1/listings"
 seen_items = set()
 
-# Создаём скрейпер, который обходит защиту Cloudflare
-scraper = cloudscraper.create_scraper(
-    browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-)
-
 def send_telegram_alert(text):
     if not TG_TOKEN or not TG_CHAT_ID:
         print("Ошибка: Токены Telegram не настроены!")
         return
-
+        
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = {"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "Markdown"}
     try:
-        # Для телеграма можно использовать обычный requests или тот же scraper
-        scraper.post(url, json=payload, timeout=10)
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Ошибка отправки в Telegram: {e}")
 
@@ -34,9 +29,9 @@ def check_market_deals():
     }
 
     try:
-        # Делаем запрос через scraper вместо requests
-        response = scraper.get(API_URL, params=params, timeout=15)
-
+        # Вот здесь магия: impersonate="chrome120" полностью подделывает отпечаток браузера
+        response = cf_requests.get(API_URL, params=params, impersonate="chrome120", timeout=15)
+        
         if response.status_code != 200:
             print(f"Ошибка ответа от API: статус {response.status_code}")
             return
@@ -63,7 +58,7 @@ def check_market_deals():
                 )
                 send_telegram_alert(alert_msg)
                 seen_items.add(item_id)
-
+                
                 if len(seen_items) > 1000:
                     seen_items.pop()
 
